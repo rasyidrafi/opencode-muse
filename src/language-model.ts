@@ -72,6 +72,13 @@ export class MuseLanguageModel implements LanguageModelV3 {
     readonly modelId: string,
     private readonly settings: Record<string, unknown>,
     private readonly registry: MuseSessionRegistry,
+    /**
+     * Key OpenCode nests provider options under. It is the model's canonical
+     * provider when one is set (`providerOptionKey` in OpenCode), so the
+     * agent/instructions options must be read from the same key they were
+     * written under.
+     */
+    private readonly providerOptionKey = PROVIDER_ID,
   ) {}
 
   async doGenerate(_options: LanguageModelV3CallOptions): Promise<never> {
@@ -119,7 +126,7 @@ export class MuseLanguageModel implements LanguageModelV3 {
     // Start a Muse turn for a new user message.
     const turn = latestUserTurn(fresh);
     if (turn && !live.hasActiveTurn) {
-      const providerOptions = options.providerOptions?.[PROVIDER_ID] as
+      const providerOptions = options.providerOptions?.[this.providerOptionKey] as
         | Record<string, unknown>
         | undefined;
       const agent = typeof providerOptions?.[AGENT_OPTION] === "string" ? providerOptions[AGENT_OPTION] : "";

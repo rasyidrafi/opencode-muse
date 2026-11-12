@@ -1,6 +1,6 @@
 {
   "name": "@rasyid_rafi/opencode-muse",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Run Muse Code inside OpenCode as a LanguageModelV3 provider",
   "license": "MIT",
   "type": "module",

@@ -8,9 +8,27 @@ export const PLUGIN_ID = "opencode-muse";
 export const PROVIDER_ID = "muse";
 export const PROVIDER_NAME = "Muse Code";
 export const PROVIDER_PACKAGE = "aisdk:muse";
+/** Models.dev's canonical provider for the Muse models; also the GUI icon. */
+const PROVIDER_CANONICAL = "meta";
+const MODEL_FAMILY = "muse";
+/**
+ * OpenChamber treats a provider as having credentials when `settings.apiKey`
+ * is non-empty, which is what keeps its Providers page from hiding the model
+ * list. Muse Code authenticates in its own CLI, so the key is a placeholder;
+ * the plugin supplies the AI SDK and never sends it to Muse.
+ */
+const PROVIDER_API_KEY = "muse-code";
 
 const AGENT_OPTION = "museAgent";
 const INSTRUCTIONS_OPTION = "museInstructions";
+
+/** Presentation names for the catalog rows, whose `displayLabel` is the id. */
+const MODEL_NAMES: Readonly<Record<string, string>> = {
+  "muse-wonder-1.0": "Muse Wonder",
+  "muse-ember-1.0": "Muse Ember",
+  "muse-spark-1.3": "Muse Spark 1.3",
+  "muse-spark-1.2": "Muse Spark 1.2",
+};
 
 const EXCLUDED_INSTRUCTIONS = new Set(["core/date", "core/environment", "core/codemode"]);
 
@@ -46,13 +64,17 @@ function toModelInfo(providerID: ReturnType<typeof Provider.ID.make>, model: Rec
   const contextLimit = typeof model.contextLimit === "number" ? model.contextLimit : 1_048_576;
   const outputLimit = typeof model.outputLimit === "number" ? model.outputLimit : 8_192;
   const variants = Array.isArray(model.variants) ? model.variants : [];
+  const displayLabel = typeof model.displayLabel === "string" ? model.displayLabel : modelId;
+  const released = typeof model.releaseDate === "string" ? Date.parse(model.releaseDate) : Number.NaN;
   return {
     ...base,
     modelID: Model.ID.make(modelId),
-    name: typeof model.displayLabel === "string" ? model.displayLabel : modelId,
+    name: MODEL_NAMES[modelId] ?? displayLabel,
+    family: Model.Family.make(MODEL_FAMILY),
     capabilities: { tools: true, input: ["text", "image"], output: ["text"] },
-    limit: { context: contextLimit, output: outputLimit },
     variants: variants.map((variant) => ({ id: Model.VariantID.make(String(variant)) })),
+    time: { released: Number.isFinite(released) && released > 0 ? released : 0 },
+    limit: { context: contextLimit, output: outputLimit },
   };
 }
 
@@ -102,6 +124,8 @@ export const MusePlugin = Plugin.define({
           name: PROVIDER_NAME,
           activation: "enabled",
           package: PROVIDER_PACKAGE,
+          canonical: Provider.ID.make(PROVIDER_CANONICAL),
+          settings: { apiKey: PROVIDER_API_KEY },
         },
         models: modelInfos,
       });
@@ -113,7 +137,8 @@ export const MusePlugin = Plugin.define({
       "sdk",
       (event) => {
         event.sdk = {
-          languageModel: (modelID: string) => new MuseLanguageModel(modelID, event.options, registry),
+          languageModel: (modelID: string) =>
+            new MuseLanguageModel(modelID, event.options, registry, event.model.canonical ?? event.model.providerID),
         };
       },
       { providerID },
