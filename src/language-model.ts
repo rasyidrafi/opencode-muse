@@ -6,9 +6,15 @@ import type {
   LanguageModelV3StreamResult,
 } from "@ai-sdk/provider";
 import type { HarnessToolResult } from "@rasyid_rafi/opencode-agent-harness-core";
-import type { MuseSessionRegistry } from "./session-registry.js";
+import type { MuseSessionRegistry, ToolDefinition } from "./session-registry.js";
 import { toAIUsage } from "./session-registry.js";
-import { latestUserTurn, toolResultsByCallId, type ToolResult } from "./prompt.js";
+import {
+  allImages,
+  fullConversationText,
+  latestUserTurn,
+  toolResultsByCallId,
+  type ToolResult,
+} from "./prompt.js";
 
 export const PROVIDER_ID = "muse";
 
@@ -22,7 +28,8 @@ export const HEADERS = {
 export const AGENT_OPTION = "museAgent";
 export const INSTRUCTIONS_OPTION = "museInstructions";
 
-export type RequestKind = "primary" | "title" | "summary" | "generate";
+/** Mirrors OpenCode's `SessionRequestKind`: only `primary` drives the live turn. */
+export type RequestKind = "primary" | "compaction" | "title" | "generate";
 
 function toToolResult(result: ToolResult): HarnessToolResult {
   const output = result.output as Record<string, unknown> | undefined;
@@ -93,22 +100,33 @@ export class MuseLanguageModel implements LanguageModelV3 {
     const forkSource = headers[HEADERS.forkSource];
 
     const tools = functionTools(options);
-    this.registry.setTools(
-      tools.map((tool) => ({
-        name: tool.name,
-        ...(tool.description === undefined ? {} : { description: tool.description }),
-        inputSchema: tool.inputSchema as Record<string, unknown>,
-      })),
-    );
+    const toolDefs: ToolDefinition[] = tools.map((tool) => ({
+      name: tool.name,
+      ...(tool.description === undefined ? {} : { description: tool.description }),
+      inputSchema: tool.inputSchema as Record<string, unknown>,
+    }));
+    this.registry.setTools(toolDefs);
 
     if (kind !== "primary") {
-      return this.runUtility(kind, options, directory);
+      // Compaction and generate branch the chat: they keep the chat's tools
+      // so the request matches the cached shape. Titles stand alone.
+      const branch = kind === "compaction" || kind === "generate";
+      return this.runUtility(kind, options, directory, branch ? toolDefs : []);
     }
     if (typeof sessionID !== "string" || sessionID.length === 0) {
       throw new Error("Muse model request is missing the session header");
     }
 
-    const live = await this.registry.get(sessionID, directory, forkSource);
+    let live = await this.registry.get(sessionID, directory, forkSource);
+    let reseed = false;
+    if (!live.isFresh && options.prompt.length < live.promptLength) {
+      // OpenCode rewrote the history (compaction, rewind): the native session
+      // still holds the old context, so recycle it and reseed from the full
+      // prompt below.
+      await this.registry.close(sessionID);
+      live = await this.registry.get(sessionID, directory, forkSource);
+      reseed = true;
+    }
     if (live.isFresh) {
       // A resumed session already holds the conversation Muse has seen, so
       // seed the diff just before the new user message.
@@ -133,15 +151,19 @@ export class MuseLanguageModel implements LanguageModelV3 {
       const instructions =
         typeof providerOptions?.[INSTRUCTIONS_OPTION] === "string" ? providerOptions[INSTRUCTIONS_OPTION] : "";
       const preamble = [agent, instructions].filter((text) => text.length > 0).join("\n\n");
+      // After a history rewrite the fresh native session has seen nothing,
+      // so seed it with the whole condensed conversation, not just the delta.
+      const body = reseed ? fullConversationText(options.prompt) : turn.text;
+      const attachments = reseed ? allImages(options.prompt) : turn.images;
       const text = live.prependPreamble(preamble) && preamble.length > 0
-        ? `${preamble}\n\n${turn.text}`
-        : turn.text;
+        ? `${preamble}\n\n${body}`
+        : body;
       await live.muse.startTurn({
         turnId: `muse_turn_${Date.now()}_${Math.random().toString(36).slice(2)}`,
         message: {
           content: [
             ...(text.length > 0 ? [{ type: "text" as const, text }] : []),
-            ...turn.images.map((image) => ({
+            ...attachments.map((image) => ({
               type: "image" as const,
               mediaType: image.mediaType,
               data: image.data,
@@ -178,6 +200,7 @@ export class MuseLanguageModel implements LanguageModelV3 {
     kind: RequestKind,
     options: LanguageModelV3CallOptions,
     directory: string,
+    tools: ToolDefinition[],
   ): Promise<LanguageModelV3StreamResult> {
     const content: Array<{ type: "text"; text: string }> = [];
     for (const message of options.prompt) {
@@ -213,7 +236,7 @@ export class MuseLanguageModel implements LanguageModelV3 {
       await ready;
       controller.enqueue({ type: "text-start", id: "utility-0" });
       try {
-        const result = await this.registry.runOnce(directory, content, options.abortSignal);
+        const result = await this.registry.runOnce(directory, content, options.abortSignal, tools);
         controller.enqueue({ type: "text-delta", id: "utility-0", delta: result.text });
         controller.enqueue({ type: "text-end", id: "utility-0" });
         controller.enqueue({

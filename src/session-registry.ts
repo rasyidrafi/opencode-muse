@@ -29,23 +29,42 @@ export interface Usage {
   outputTokens?: number;
   reasoningTokens?: number;
   cachedInputTokens?: number;
+  cacheWriteTokens?: number;
   totalTokens?: number;
   [key: string]: number | undefined;
 }
 
-/** Convert our flat usage counters to the AI SDK v3 usage shape. */
+/**
+ * Convert our flat usage counters to the AI SDK v3 usage shape.
+ *
+ * The SDK splits input into fresh (`noCache`) and cached (`cacheRead` +
+ * `cacheWrite`) portions with `total` as their sum; `text` is the visible
+ * output excluding reasoning. Reporting the total as `noCache` (or the total
+ * as `text`) would double-count the cached/reasoning portions downstream.
+ */
 export function toAIUsage(usage: Usage): LanguageModelV3Usage {
+  const total = usage.inputTokens;
+  const read = usage.cachedInputTokens;
+  const write = usage.cacheWriteTokens;
+  const output = usage.outputTokens;
+  const reasoning = usage.reasoningTokens;
   return {
     inputTokens: {
-      total: usage.inputTokens,
-      noCache: usage.inputTokens,
-      cacheRead: usage.cachedInputTokens,
-      cacheWrite: undefined,
+      total,
+      noCache:
+        total === undefined ? undefined : Math.max(0, total - (read ?? 0) - (write ?? 0)),
+      cacheRead: read,
+      cacheWrite: write,
     },
     outputTokens: {
-      total: usage.outputTokens,
-      text: usage.outputTokens,
-      reasoning: usage.reasoningTokens,
+      total: output,
+      text:
+        output === undefined
+          ? undefined
+          : reasoning === undefined
+            ? output
+            : Math.max(0, output - reasoning),
+      reasoning,
     },
   };
 }
@@ -321,17 +340,24 @@ export class MuseSessionRegistry {
     this.sessions.clear();
   }
 
-  /** Run a one-off Muse turn that does not touch a live session. */
+  /**
+   * Run a one-off Muse turn that does not touch a live session.
+   *
+   * Utility prompts (compaction, generate) are offered the chat's tools so the
+   * request matches the cached shape; calls are still refused, since the
+   * summary prompt must not perform work.
+   */
   async runOnce(
     cwd: string,
     content: Array<{ type: "text"; text: string }>,
     signal?: AbortSignal,
+    tools: ToolDefinition[] = [],
   ): Promise<{ text: string; usage: Usage }> {
     const session = await this.adapter.openSession({
       sessionId: `oneoff_${Date.now()}_${Math.random().toString(36).slice(2)}`,
       cwd,
       toolBridge: {
-        listTools: () => [],
+        listTools: () => tools,
         callTool: async (call) => ({
           content: [{ type: "text", text: `Tool ${call.name} is not available for this request.` }],
           isError: true,

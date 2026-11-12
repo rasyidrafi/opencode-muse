@@ -75,6 +75,35 @@ export function latestUserTurn(prompt: LanguageModelV3Prompt): UserTurn | undefi
   return undefined;
 }
 
+/** Image attachments across every user message, in order. */
+export function allImages(prompt: LanguageModelV3Prompt): ImageAttachment[] {
+  const images: ImageAttachment[] = [];
+  for (const message of prompt) {
+    if (message.role !== "user" || !Array.isArray(message.content)) continue;
+    for (const part of message.content) {
+      if (part.type !== "file") continue;
+      const image = filePartToImage(part);
+      if (image) images.push(image);
+    }
+  }
+  return images;
+}
+
+/** All user and system text in order, for reseeding a fresh native session. */
+export function fullConversationText(prompt: LanguageModelV3Prompt): string {
+  const parts: string[] = [];
+  for (const message of prompt) {
+    if (message.role === "system") {
+      if (message.content.length > 0) parts.push(message.content);
+      continue;
+    }
+    if (message.role !== "user") continue;
+    const text = textOfContent(message.content);
+    if (text.length > 0) parts.push(text);
+  }
+  return parts.join("\n\n");
+}
+
 /** Tool results carried by `tool` messages (and assistant tool-result parts). */
 export function collectToolResults(messages: ReadonlyArray<LanguageModelV3Prompt[number]>): ToolResult[] {
   const results: ToolResult[] = [];

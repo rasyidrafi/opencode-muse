@@ -130,13 +130,22 @@ export function toFailure(error: unknown): HarnessFailure {
   };
 }
 
-/** MSP `TokenUsage` -> contract token usage. */
+/**
+ * MSP `TokenUsage` -> contract token usage.
+ *
+ * The raw shape also carries `cacheReadTokens`/`cacheWriteTokens` (split cache
+ * accounting) alongside the legacy combined `cachedTokens`. The contract only
+ * has room for one cache figure, so the read side wins and the write side
+ * rides along as `cacheWriteTokens` for hosts that forward unknown numeric
+ * usage fields (our registry does).
+ */
 export function toTokenUsage(usage: unknown):
   | {
       inputTokens?: number;
       outputTokens?: number;
       reasoningTokens?: number;
       cachedInputTokens?: number;
+      cacheWriteTokens?: number;
       totalTokens?: number;
     }
   | undefined {
@@ -146,13 +155,16 @@ export function toTokenUsage(usage: unknown):
   const output = typeof value.outputTokens === "number" ? value.outputTokens : undefined;
   const reasoning = typeof value.reasoningTokens === "number" ? value.reasoningTokens : undefined;
   const cached = typeof value.cachedTokens === "number" ? value.cachedTokens : undefined;
+  const cacheRead = typeof value.cacheReadTokens === "number" ? value.cacheReadTokens : undefined;
+  const cacheWrite = typeof value.cacheWriteTokens === "number" ? value.cacheWriteTokens : undefined;
   const total =
     typeof input === "number" && typeof output === "number" ? input + output : undefined;
   return {
     ...(input !== undefined ? { inputTokens: input } : {}),
     ...(output !== undefined ? { outputTokens: output } : {}),
     ...(reasoning !== undefined ? { reasoningTokens: reasoning } : {}),
-    ...(cached !== undefined ? { cachedInputTokens: cached } : {}),
+    ...((cacheRead ?? cached) !== undefined ? { cachedInputTokens: cacheRead ?? cached } : {}),
+    ...(cacheWrite !== undefined ? { cacheWriteTokens: cacheWrite } : {}),
     ...(total !== undefined ? { totalTokens: total } : {}),
   };
 }

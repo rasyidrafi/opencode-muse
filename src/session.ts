@@ -97,6 +97,31 @@ interface UserInputQuestion {
   readonly options: ReadonlyArray<{ readonly label: string }>;
 }
 
+/**
+ * Usage accumulated for one native turn.
+ *
+ * A turn can carry several model completions (tool loop), each reported via
+ * `session/tokenUsage`. Context fields (`inputTokens`, cache counters,
+ * `totalTokens`) keep the highest value — the last report describes the whole
+ * context. `outputTokens`/`reasoningTokens` are per-completion, so they are
+ * summed, guarded by the `totalTokens` high-water mark so a repeated report
+ * of the same completion is not counted twice.
+ */
+interface TurnUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  reasoningTokens?: number;
+  cachedInputTokens?: number;
+  cacheWriteTokens?: number;
+  totalTokens?: number;
+}
+
+export interface ContextUsage {
+  readonly usedTokens: number;
+  readonly windowTokens?: number;
+  readonly pressure: string;
+}
+
 /** The minimal host surface a session needs, so tests can supply a fake. */
 export interface SessionConnection {
   mintCommandId(): string;
@@ -115,6 +140,12 @@ export interface SessionHost {
 
 function now(): string {
   return new Date().toISOString();
+}
+
+function max(a: number | undefined, b: number | undefined): number | undefined {
+  if (a === undefined) return b;
+  if (b === undefined) return a;
+  return Math.max(a, b);
 }
 
 function textContent(text: string): ReadonlyArray<HarnessContentBlock> {
@@ -167,6 +198,8 @@ export class MuseHarnessSession implements HarnessSession, NotificationSink {
   private readonly toolBridge: import("@rasyid_rafi/opencode-agent-harness-core").HarnessToolBridge | undefined;
   private readonly bridgeServer: ToolBridgeServer | undefined;
   private readonly turns = new Map<string, ActiveTurn>();
+  private readonly turnUsage = new Map<string, TurnUsage>();
+  private lastContextUsage: ContextUsage | null = null;
   private readonly hostToNative = new Map<string, string>();
   private readonly nativeToHost = new Map<string, string>();
   private readonly messages = new Map<string, HarnessMessage>();
@@ -321,6 +354,11 @@ export class MuseHarnessSession implements HarnessSession, NotificationSink {
   /** The native Muse session id, for resume and persistence. */
   get nativeSessionId(): string {
     return this.nativeId;
+  }
+
+  /** Latest `session/contextUsage` for this session, if the host sent one. */
+  get contextUsage(): ContextUsage | null {
+    return this.lastContextUsage;
   }
 
   subscribe(): AsyncIterable<HarnessEvent> {
@@ -570,6 +608,12 @@ export class MuseHarnessSession implements HarnessSession, NotificationSink {
       case "userInput/settled":
         this.onUserInputSettled(params);
         break;
+      case "session/tokenUsage":
+        this.onTokenUsage(params);
+        break;
+      case "session/contextUsage":
+        this.onContextUsage(params);
+        break;
       case "session/statusChanged":
         this.onSessionStatusChanged(params);
         break;
@@ -612,16 +656,63 @@ export class MuseHarnessSession implements HarnessSession, NotificationSink {
     const terminal = typeof params.terminal === "string" ? params.terminal : "failed";
     const status = toTurnStatus(terminal);
     const failure = status === "failed" ? toFailure(params.error) : null;
+    // `turn/completed` rarely carries usage (see fixtures); the per-completion
+    // `session/tokenUsage` reports accumulated above are the primary source.
+    const stored = this.turnUsage.get(nativeTurnId);
+    this.turnUsage.delete(nativeTurnId);
+    const inline = params.usage === undefined ? undefined : toTokenUsage(params.usage);
+    const tokenUsage = stored ?? inline;
     const turn: HarnessTurn = {
       ...active.turn,
       status,
       completedAt: now(),
-      ...(params.usage === undefined ? {} : { tokenUsage: toTokenUsage(params.usage) }),
+      ...(tokenUsage === undefined ? {} : { tokenUsage }),
     };
     active.turn = turn;
     active.terminal = true;
     this.emit({ type: "turn.updated", turn });
     this.emit({ type: "turn.terminal", turn, failure });
+  }
+
+  private onTokenUsage(params: Record<string, unknown>): void {
+    const nativeTurnId = typeof params.turnId === "string" ? params.turnId : undefined;
+    if (nativeTurnId === undefined) return;
+    const breakdown = toTokenUsage(params.usage);
+    const promptTokens = typeof params.promptTokens === "number" ? params.promptTokens : undefined;
+    const totalTokens = typeof params.totalTokens === "number" ? params.totalTokens : undefined;
+    if (breakdown === undefined && promptTokens === undefined && totalTokens === undefined) return;
+    // The SDK folds running session totals into `cumulative` (replace, never
+    // sum); only the per-completion fields above describe this turn.
+    const prev = this.turnUsage.get(nativeTurnId);
+    const advanced =
+      totalTokens !== undefined && (prev?.totalTokens === undefined || totalTokens > prev.totalTokens);
+    const next: TurnUsage = {
+      inputTokens: max(prev?.inputTokens, promptTokens ?? breakdown?.inputTokens),
+      cachedInputTokens: max(prev?.cachedInputTokens, breakdown?.cachedInputTokens),
+      cacheWriteTokens: max(prev?.cacheWriteTokens, breakdown?.cacheWriteTokens),
+      totalTokens: max(prev?.totalTokens, totalTokens ?? breakdown?.totalTokens),
+      outputTokens:
+        prev === undefined || advanced
+          ? (prev?.outputTokens ?? 0) + (breakdown?.outputTokens ?? 0)
+          : prev.outputTokens,
+      reasoningTokens:
+        prev === undefined || advanced
+          ? (prev?.reasoningTokens ?? 0) + (breakdown?.reasoningTokens ?? 0)
+          : prev.reasoningTokens,
+    };
+    this.turnUsage.set(nativeTurnId, next);
+  }
+
+  private onContextUsage(params: Record<string, unknown>): void {
+    const usedTokens = typeof params.usedTokens === "number" ? params.usedTokens : undefined;
+    if (usedTokens === undefined) return;
+    const windowTokens = typeof params.windowTokens === "number" ? params.windowTokens : undefined;
+    const pressure = typeof params.pressure === "string" ? params.pressure : "unknown";
+    this.lastContextUsage = {
+      usedTokens,
+      ...(windowTokens === undefined ? {} : { windowTokens }),
+      pressure,
+    };
   }
 
   private onItemStarted(params: Record<string, unknown>): void {
