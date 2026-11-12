@@ -10,8 +10,8 @@ import type {
   HarnessToolItem,
   HarnessTurn,
   HarnessUserMessage,
-} from "@opencode-agent-harness/core";
-import { HarnessError, nativeRef } from "@opencode-agent-harness/core";
+} from "@rasyid_rafi/opencode-agent-harness-core";
+import { HarnessError, nativeRef } from "@rasyid_rafi/opencode-agent-harness-core";
 import type { MuseNotification, NotificationSink } from "./host.js";
 import { startToolBridgeServer, normalizeToolName, BRIDGE_MCP_SERVER_NAME, type ToolBridgeServer } from "./bridge.js";
 import { MUSE_CAPABILITIES } from "./capabilities.js";
@@ -143,7 +143,7 @@ export interface CreateSessionInput {
   readonly sessionId: string;
   readonly cwd: string;
   readonly model?: string | null;
-  readonly toolBridge?: import("@opencode-agent-harness/core").HarnessToolBridge;
+  readonly toolBridge?: import("@rasyid_rafi/opencode-agent-harness-core").HarnessToolBridge;
   readonly signal?: AbortSignal;
   /** Starting approval mode; omitted selects the host default. */
   readonly approvalMode?: string;
@@ -164,7 +164,7 @@ export class MuseHarnessSession implements HarnessSession, NotificationSink {
   private readonly nativeId: string;
   private readonly bus = new EventBus();
   private readonly capabilities = MUSE_CAPABILITIES;
-  private readonly toolBridge: import("@opencode-agent-harness/core").HarnessToolBridge | undefined;
+  private readonly toolBridge: import("@rasyid_rafi/opencode-agent-harness-core").HarnessToolBridge | undefined;
   private readonly bridgeServer: ToolBridgeServer | undefined;
   private readonly turns = new Map<string, ActiveTurn>();
   private readonly hostToNative = new Map<string, string>();
@@ -187,7 +187,7 @@ export class MuseHarnessSession implements HarnessSession, NotificationSink {
     input: CreateSessionInput,
     nativeSessionId: string,
     startedAt: string,
-    toolBridge?: import("@opencode-agent-harness/core").HarnessToolBridge,
+    toolBridge?: import("@rasyid_rafi/opencode-agent-harness-core").HarnessToolBridge,
     bridgeServer?: ToolBridgeServer,
   ) {
     this.host = host;
@@ -352,7 +352,7 @@ export class MuseHarnessSession implements HarnessSession, NotificationSink {
 
   // ------------------------------------------------------------------ turns
 
-  async startTurn(input: import("@opencode-agent-harness/core").StartTurnInput): Promise<HarnessTurn> {
+  async startTurn(input: import("@rasyid_rafi/opencode-agent-harness-core").StartTurnInput): Promise<HarnessTurn> {
     this.assertOpen();
     const commandId = this.host.connection.mintCommandId();
     const result = await this.host.connection.command(
@@ -381,7 +381,7 @@ export class MuseHarnessSession implements HarnessSession, NotificationSink {
     return turn;
   }
 
-  async interruptTurn(input: import("@opencode-agent-harness/core").InterruptTurnInput): Promise<void> {
+  async interruptTurn(input: import("@rasyid_rafi/opencode-agent-harness-core").InterruptTurnInput): Promise<void> {
     this.assertOpen();
     const nativeTurnId = this.nativeTurnId(input.turnId);
     if (nativeTurnId === undefined) {
@@ -397,7 +397,7 @@ export class MuseHarnessSession implements HarnessSession, NotificationSink {
     );
   }
 
-  async steerTurn(input: import("@opencode-agent-harness/core").SteerTurnInput): Promise<void> {
+  async steerTurn(input: import("@rasyid_rafi/opencode-agent-harness-core").SteerTurnInput): Promise<void> {
     this.assertOpen();
     const nativeTurnId = this.nativeTurnId(input.turnId);
     if (nativeTurnId === undefined) {

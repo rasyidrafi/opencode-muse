@@ -1,6 +1,6 @@
 {
   "name": "@rasyid_rafi/opencode-muse",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Run Muse Code inside OpenCode as a LanguageModelV3 provider",
   "license": "MIT",
   "type": "module",
@@ -30,7 +30,7 @@
   "dependencies": {
     "@ai-sdk/provider": "3.0.8",
     "@muse-code/sdk": "1.4.15",
-    "@opencode-agent-harness/core": "file:../opencode-agent-harness",
+    "@rasyid_rafi/opencode-agent-harness-core": "^0.1.0",
     "@opencode/plugin": "2.2.7"
   },
   "devDependencies": {

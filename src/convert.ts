@@ -1,5 +1,5 @@
 import type { LanguageModelV3StreamPart } from "@ai-sdk/provider";
-import type { HarnessEvent } from "@opencode-agent-harness/core";
+import type { HarnessEvent } from "@rasyid_rafi/opencode-agent-harness-core";
 
 /**
  * Convert the harness event stream into AI SDK stream parts.

@@ -5,7 +5,7 @@ import type {
   LanguageModelV3StreamPart,
   LanguageModelV3StreamResult,
 } from "@ai-sdk/provider";
-import type { HarnessToolResult } from "@opencode-agent-harness/core";
+import type { HarnessToolResult } from "@rasyid_rafi/opencode-agent-harness-core";
 import type { MuseSessionRegistry } from "./session-registry.js";
 import { toAIUsage } from "./session-registry.js";
 import { latestUserTurn, toolResultsByCallId, type ToolResult } from "./prompt.js";

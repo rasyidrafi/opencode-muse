@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { HarnessEvent } from "@opencode-agent-harness/core";
+import type { HarnessEvent } from "@rasyid_rafi/opencode-agent-harness-core";
 import { MuseHarnessAdapter } from "../src/index.js";
 
 const tools = [

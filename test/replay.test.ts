@@ -4,7 +4,7 @@ import {
   assertTurnEventContract,
   assistantText,
   type HarnessEvent,
-} from "@opencode-agent-harness/core/testing";
+} from "@rasyid_rafi/opencode-agent-harness-core/testing";
 import {
   MuseHarnessSession,
   type SessionHost,
