@@ -36,10 +36,14 @@ OpenCode owns the loop, the conversation, and every tool call:
 
 ## Install
 
-From a plugin directory (local checkout):
+```sh
+opencode plugin add @rasyid_rafi/opencode-muse
+```
+
+or from a local checkout:
 
 ```sh
-git clone https://github.com/<you>/opencode-muse.git
+git clone https://github.com/rasyidrafi/opencode-muse.git
 ```
 
 ```jsonc title="opencode.jsonc"
