@@ -91,7 +91,10 @@ export const MusePlugin = Plugin.define({
     const adapter = new MuseHarnessAdapter({
       hostOptions: {
         museBin: process.env.MUSE_BIN ?? "muse",
-        ...(process.env.MUSE_PRESET === undefined ? {} : { preset: process.env.MUSE_PRESET }),
+        // Muse's built-in tools otherwise answer inside Muse's own loop,
+        // bypassing OpenCode's permissions and history. `empty` keeps only the
+        // per-session MCP bridge, so every tool call reaches OpenCode.
+        preset: process.env.MUSE_PRESET ?? "empty",
         trustWorkspace: true,
       },
     });

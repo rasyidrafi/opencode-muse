@@ -66,7 +66,7 @@ Environment variables read by the plugin:
 | Variable | Default | Description |
 | --- | --- | --- |
 | `MUSE_BIN` | `muse` | Muse Code binary. |
-| `MUSE_PRESET` | _(host default)_ | Host preset. Set `empty` to run with no built-in tools. |
+| `MUSE_PRESET` | `empty` | Host preset. The default `empty` disables Muse's built-in tools, so only OpenCode's tools reach Muse through the bridge. |
 
 Example — run Muse with no built-in tools (custom MCP tools only):
 
