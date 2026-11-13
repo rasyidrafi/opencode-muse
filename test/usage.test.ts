@@ -178,7 +178,7 @@ describe("usage accounting", () => {
       { role: "assistant", content: [{ type: "text", text: "ack" }] },
       { role: "user", content: [{ type: "text", text: "second" }] },
     ] as never;
-    expect(fullConversationText(prompt)).toBe("sys\n\nfirst\n\nsecond");
+    expect(fullConversationText(prompt)).toBe("sys\n\nfirst\n\nack\n\nsecond");
     expect(allImages([{ role: "user", content: "no files" }] as never)).toEqual([]);
   });
 });

@@ -89,12 +89,19 @@ export function allImages(prompt: LanguageModelV3Prompt): ImageAttachment[] {
   return images;
 }
 
-/** All user and system text in order, for reseeding a fresh native session. */
+/** System, user, and assistant text in order, for reseeding a fresh native session. */
 export function fullConversationText(prompt: LanguageModelV3Prompt): string {
   const parts: string[] = [];
   for (const message of prompt) {
     if (message.role === "system") {
       if (message.content.length > 0) parts.push(message.content);
+      continue;
+    }
+    // Assistant answers are part of the conversation the fresh session must
+    // see; only the text carries over (tool calls replay live via the bridge).
+    if (message.role === "assistant") {
+      const text = textOfContent(message.content);
+      if (text.length > 0) parts.push(text);
       continue;
     }
     if (message.role !== "user") continue;

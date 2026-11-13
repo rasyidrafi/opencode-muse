@@ -87,6 +87,9 @@ export class LiveSession {
   private controller: ReadableStreamDefaultController<LanguageModelV3StreamPart> | null = null;
   private queue: LanguageModelV3StreamPart[] = [];
   private turnActive = false;
+  private currentTurnId: string | null = null;
+  private stepAborted = false;
+  private stepEnded = false;
   private lastPromptLength = 0;
   private counter = 0;
   private parkTimer: ReturnType<typeof setTimeout> | null = null;
@@ -95,6 +98,8 @@ export class LiveSession {
   private preamble = "";
   private preambleSent = false;
   private fresh = true;
+  private model: string | null;
+  private fullSeed = false;
 
   /** True until the first step seeds the prompt diff. */
   get isFresh(): boolean {
@@ -103,6 +108,18 @@ export class LiveSession {
 
   markSeen(): void {
     this.fresh = false;
+  }
+
+  /** The next turn carries the full conversation: a forked native session has seen nothing yet. */
+  requestFullSeed(): void {
+    this.fullSeed = true;
+  }
+
+  /** Consume the one-shot full-seed flag. */
+  takeFullSeed(): boolean {
+    const value = this.fullSeed;
+    this.fullSeed = false;
+    return value;
   }
 
   /** Prepend the agent role/instructions once, and again when they change. */
@@ -117,6 +134,7 @@ export class LiveSession {
   constructor(openCodeSessionId: string, muse: MuseHarnessSession) {
     this.openCodeSessionId = openCodeSessionId;
     this.muse = muse;
+    this.model = muse.info.model;
     void this.pump();
   }
 
@@ -132,8 +150,24 @@ export class LiveSession {
     return this.turnActive;
   }
 
-  setActiveTurn(value: boolean): void {
+  /** Host turn id of the running turn, for `turn/steer` and `turn/interrupt`. */
+  get activeTurnId(): string | null {
+    return this.currentTurnId;
+  }
+
+  setActiveTurn(value: boolean, turnId?: string): void {
     this.turnActive = value;
+    this.currentTurnId = value ? (turnId ?? null) : null;
+  }
+
+  /**
+   * Switch the standing model. A no-op when the session already uses it, so a
+   * step never pays for a redundant host command.
+   */
+  async setModel(model: string): Promise<void> {
+    if (this.model === model) return;
+    await this.muse.setModel(model);
+    this.model = model;
   }
 
   get toolCounter(): number {
@@ -151,9 +185,16 @@ export class LiveSession {
         if (this.closed) return;
         for (const part of this.converter.convert(event)) this.enqueue(part);
         if (event.type === "turn.terminal") {
-          this.turnActive = false;
+          this.setActiveTurn(false);
           this.mergeUsage(event.turn.tokenUsage as Usage | undefined);
-          if (this.pending.size === 0) this.endStep("stop");
+          if (this.pending.size > 0) {
+            // The turn ended before its tool calls were answered; they can
+            // never be. Reject them so the bridge does not wait forever.
+            this.clearPending(new Error("Turn ended before the tool result arrived"));
+          }
+          // The step always settles here. Skipping the finish when calls are
+          // pending leaves the stream open, and the next step hangs.
+          this.endStep("stop");
         }
       }
     } catch {
@@ -182,15 +223,78 @@ export class LiveSession {
     if (this.queue.length < 10_000) this.queue.push(part);
   }
 
-  /** Attach a new step's stream, flushing anything buffered while detached. */
+  /**
+   * Attach a new step's stream, flushing anything buffered while detached.
+   *
+   * A buffered finish means the step it belonged to already ended, so the new
+   * stream closes right after it. With no turn running there is nothing to
+   * wait for either: the step settles at once instead of hanging.
+   */
   attach(controller: ReadableStreamDefaultController<LanguageModelV3StreamPart>): void {
     this.controller = controller;
-    for (const part of this.queue) controller.enqueue(part);
+    this.stepEnded = false;
+    const queue = this.queue;
     this.queue = [];
+    let finished = false;
+    for (const part of queue) {
+      try {
+        controller.enqueue(part);
+      } catch {
+        this.controller = null;
+        return;
+      }
+      if (part.type === "finish") finished = true;
+    }
+    if (!finished && this.turnActive) return;
+    this.controller = null;
+    if (!finished) {
+      // A terminal that landed between steps merged usage but skipped its
+      // finish; report it here instead of dropping it.
+      const usage = this.stepUsage;
+      this.stepUsage = {};
+      try {
+        controller.enqueue({
+          type: "finish",
+          finishReason: { unified: "stop", raw: "stop" },
+          usage: toAIUsage(usage),
+        });
+      } catch {
+        // Already closed.
+      }
+    }
+    try {
+      controller.close();
+    } catch {
+      // Already closed.
+    }
   }
 
   detach(): void {
     this.controller = null;
+  }
+
+  /**
+   * Stop the active turn because OpenCode cancelled the step.
+   *
+   * A turn parked on tool calls is left waiting for its results, mirroring the
+   * reference provider: interrupting it would only turn the pending calls into
+   * errors. A turn that is still generating is interrupted natively, and the
+   * buffered parts are dropped so a stale finish cannot reach the next step.
+   */
+  async interrupt(): Promise<void> {
+    if (!this.turnActive || this.pending.size > 0) return;
+    const turnId = this.currentTurnId;
+    this.setActiveTurn(false);
+    this.stepAborted = true;
+    this.queue = [];
+    if (turnId !== null) {
+      try {
+        await this.muse.interruptTurn({ turnId });
+      } catch {
+        // The turn may already be over.
+      }
+    }
+    this.clearPending(new Error("Turn interrupted"));
   }
 
   /** Emit a tool call to OpenCode and park the step. */
@@ -216,9 +320,28 @@ export class LiveSession {
 
   /** End the current step. */
   endStep(finishReason: "stop" | "tool-calls"): void {
+    // A step ends once. A park and a terminal can both land on the same step
+    // when a turn stops right after issuing a tool call.
+    if (this.stepEnded) return;
+    this.stepEnded = true;
     if (this.parkTimer) {
       clearTimeout(this.parkTimer);
       this.parkTimer = null;
+    }
+    const controller = this.controller;
+    this.controller = null;
+    if (this.stepAborted) {
+      // The step was cancelled: a finish for it would be a stray part in the
+      // next step's stream. Close the controller we already detached instead.
+      this.stepAborted = false;
+      if (controller) {
+        try {
+          controller.close();
+        } catch {
+          // Already closed.
+        }
+      }
+      return;
     }
     for (const part of this.converter.closeBlocks()) this.enqueue(part);
     const usage = this.stepUsage;
@@ -230,8 +353,6 @@ export class LiveSession {
         : { unified: "stop", raw: "stop" },
       usage: toAIUsage(usage),
     });
-    const controller = this.controller;
-    this.controller = null;
     if (controller) {
       try {
         controller.close();
@@ -287,13 +408,31 @@ export class MuseSessionRegistry {
     return this.adapter.listModels();
   }
 
-  /** Get or create the live session for an OpenCode session id. */
-  async get(openCodeSessionId: string, cwd: string, resumeFrom?: string): Promise<LiveSession> {
+  /**
+   * Get or create the live session for an OpenCode session id.
+   *
+   * `resumeFrom` is the OpenCode id of the session being forked. A fork starts
+   * a *new* native session: resuming the source's native id would overwrite
+   * the source's notification sink, and a server-side fork inherits the
+   * source's MCP bridge instead of this session's. The forked conversation
+   * reseeds here as text on its first turn.
+   */
+  async get(
+    openCodeSessionId: string,
+    cwd: string,
+    resumeFrom?: string,
+    model?: string,
+  ): Promise<LiveSession> {
     const existing = this.sessions.get(openCodeSessionId);
-    if (existing) return existing;
+    if (existing) {
+      if (model !== undefined) await existing.setModel(model);
+      return existing;
+    }
 
-    const persisted = (await this.store?.get(openCodeSessionId)) ??
-      (resumeFrom === undefined ? undefined : await this.store?.get(resumeFrom));
+    const own = await this.store?.get(openCodeSessionId);
+    // A fork never reattaches to the source's native session; it starts fresh
+    // and its first turn carries the full conversation as text.
+    const seedFull = own === undefined && resumeFrom !== undefined;
 
     let live: LiveSession | undefined;
     const bridge: HarnessToolBridge = {
@@ -313,10 +452,12 @@ export class MuseSessionRegistry {
     const muse = await this.adapter.openSession({
       sessionId: openCodeSessionId,
       cwd,
-      ...(persisted === undefined ? {} : { resumeSessionId: persisted }),
+      ...(model === undefined ? {} : { model }),
+      ...(own !== undefined ? { resumeSessionId: own } : {}),
       toolBridge: bridge,
     });
     live = new LiveSession(openCodeSessionId, muse as MuseHarnessSession);
+    if (seedFull) live.requestFullSeed();
     this.sessions.set(openCodeSessionId, live);
     if (this.store) {
       await this.store.set(openCodeSessionId, live.muse.nativeSessionId).catch(() => undefined);
@@ -352,10 +493,12 @@ export class MuseSessionRegistry {
     content: Array<{ type: "text"; text: string }>,
     signal?: AbortSignal,
     tools: ToolDefinition[] = [],
+    model?: string,
   ): Promise<{ text: string; usage: Usage }> {
     const session = await this.adapter.openSession({
       sessionId: `oneoff_${Date.now()}_${Math.random().toString(36).slice(2)}`,
       cwd,
+      ...(model === undefined ? {} : { model }),
       toolBridge: {
         listTools: () => tools,
         callTool: async (call) => ({
@@ -377,17 +520,21 @@ export class MuseSessionRegistry {
       turnId: `oneoff_turn_${Date.now()}`,
       message: { content },
     });
-    await Promise.race([
-      terminal,
-      new Promise<void>((_, reject) => {
-        const timer = setTimeout(() => reject(new Error("one-off turn timed out")), 120_000);
-        timer.unref?.();
-        signal?.addEventListener("abort", () => {
-          clearTimeout(timer);
-          reject(new Error("aborted"));
-        }, { once: true });
-      }),
-    ]);
+    try {
+      await Promise.race([
+        terminal,
+        new Promise<void>((_, reject) => {
+          const timer = setTimeout(() => reject(new Error("one-off turn timed out")), 120_000);
+          timer.unref?.();
+          signal?.addEventListener("abort", () => {
+            clearTimeout(timer);
+            reject(new Error("aborted"));
+          }, { once: true });
+        }),
+      ]);
+    } finally {
+      await session.close();
+    }
     let text = "";
     for (const event of events) {
       if (event.type === "message.delta" && event.text) text += event.text;
@@ -401,7 +548,6 @@ export class MuseSessionRegistry {
     const terminalEvent = events.find((event) => event.type === "turn.terminal");
     const usage: Usage =
       terminalEvent?.type === "turn.terminal" ? (terminalEvent.turn.tokenUsage as Usage | undefined) ?? {} : {};
-    await session.close();
     return { text, usage };
   }
 }

@@ -49,8 +49,14 @@ function instructionsText(system: ReadonlyArray<SystemPart>): string {
     const metadata = part.metadata as
       | { experimental?: { instructions?: ReadonlyArray<{ key: string; text: string }> } }
       | undefined;
-    if (!metadata?.experimental?.instructions) continue;
-    for (const source of metadata.experimental.instructions) {
+    const instructions = metadata?.experimental?.instructions;
+    if (instructions === undefined) {
+      // A part without instruction metadata is still forwarded text; dropping
+      // it would silently lose part of OpenCode's prompt.
+      if (part.text.length > 0) texts.push(part.text);
+      continue;
+    }
+    for (const source of instructions) {
       if (EXCLUDED_INSTRUCTIONS.has(source.key)) continue;
       texts.push(source.text);
     }
@@ -163,6 +169,16 @@ export const MusePlugin = Plugin.define({
         } catch {
           // Keep the default directory.
         }
+      },
+      { providerID },
+    );
+
+    // Muse retries model failures itself. Replaying the whole turn here would
+    // also retry permanent errors, and the native turn cannot survive a replay.
+    await ctx.session.hook(
+      "retry",
+      async (event) => {
+        event.decision = { retry: false };
       },
       { providerID },
     );

@@ -262,6 +262,19 @@ export class MuseHarnessSession implements HarnessSession, NotificationSink {
         }
       : undefined;
 
+    const startParams = () => ({
+      workspaceRoot: input.cwd,
+      ...(input.model ? { modelId: input.model } : {}),
+      ...(input.approvalMode ? { approvalMode: input.approvalMode } : {}),
+      ...(config === undefined ? {} : { config }),
+    });
+    // A failed construction starts fresh with a new command id: reusing one is
+    // a protocol error, and a missing source must not take the chat down.
+    const startFresh = () =>
+      host.connection.command("session/start", startParams(), {
+        commandId: host.connection.mintCommandId(),
+      });
+
     let result: Record<string, unknown>;
     if (input.resumeSessionId !== undefined) {
       try {
@@ -269,35 +282,17 @@ export class MuseHarnessSession implements HarnessSession, NotificationSink {
           "session/resume",
           {
             sessionId: input.resumeSessionId,
+            ...(input.model ? { modelId: input.model } : {}),
             ...(config === undefined ? {} : { config }),
           },
           { commandId },
         );
       } catch {
-        // The retained session is gone (pruned, or a different host). Start
-        // fresh with a new command id: reusing one is a protocol error.
-        result = await host.connection.command(
-          "session/start",
-          {
-            workspaceRoot: input.cwd,
-            ...(input.model ? { modelId: input.model } : {}),
-            ...(input.approvalMode ? { approvalMode: input.approvalMode } : {}),
-            ...(config === undefined ? {} : { config }),
-          },
-          { commandId: host.connection.mintCommandId() },
-        );
+        // The retained session is gone (pruned, or a different host).
+        result = await startFresh();
       }
     } else {
-      result = await host.connection.command(
-        "session/start",
-        {
-          workspaceRoot: input.cwd,
-          ...(input.model ? { modelId: input.model } : {}),
-          ...(input.approvalMode ? { approvalMode: input.approvalMode } : {}),
-          ...(config === undefined ? {} : { config }),
-        },
-        { commandId },
-      );
+      result = await host.connection.command("session/start", startParams(), { commandId });
     }
 
     const session = result?.session as Record<string, unknown> | undefined;
@@ -410,13 +405,30 @@ export class MuseHarnessSession implements HarnessSession, NotificationSink {
       id: input.turnId,
       nativeRef: nativeRef(nativeTurnId, this.capabilities.identity.nativeTurnIds),
       ordinal: this.turns.size + 1,
-      status: "running",
+      // The turn is accepted but not running until the host confirms it with
+      // `turn/started`; `onTurnStarted` settles the status and emits the event.
+      status: "pending",
       model: input.model ?? this.sessionInfo.model,
       startedAt: now(),
       completedAt: null,
     };
     this.turns.set(input.turnId, { turn, terminal: false });
     return turn;
+  }
+
+  /**
+   * Switch the session's standing model. The host applies it at the next
+   * model-call boundary when a turn is running, so the picker takes effect
+   * without restarting the session.
+   */
+  async setModel(model: string): Promise<void> {
+    this.assertOpen();
+    await this.host.connection.command(
+      "session/setModel",
+      { sessionId: this.nativeId, model: { modelId: model } },
+      { commandId: this.host.connection.mintCommandId() },
+    );
+    this.sessionInfo = { ...this.sessionInfo, model, updatedAt: now() };
   }
 
   async interruptTurn(input: import("@rasyid_rafi/opencode-agent-harness-core").InterruptTurnInput): Promise<void> {
@@ -599,6 +611,9 @@ export class MuseHarnessSession implements HarnessSession, NotificationSink {
       case "approval/requested":
         this.onApprovalRequested(params);
         break;
+      case "approval/updated":
+        this.onApprovalUpdated(params);
+        break;
       case "approval/resolved":
         this.onApprovalResolved(params);
         break;
@@ -637,7 +652,7 @@ export class MuseHarnessSession implements HarnessSession, NotificationSink {
       nativeRef: nativeRef(nativeTurnId, this.capabilities.identity.nativeTurnIds),
       ordinal: existing ? existing.turn.ordinal : this.turns.size + 1,
       status: "running",
-      model: this.sessionInfo.model,
+      model: existing?.turn.model ?? this.sessionInfo.model,
       startedAt: now(),
       completedAt: null,
     };
@@ -848,6 +863,31 @@ export class MuseHarnessSession implements HarnessSession, NotificationSink {
       this.requestRequirements.set(request.id, params.currentRequirementId);
     }
     this.emit({ type: "request.updated", request });
+  }
+
+  /**
+   * A multi-stage approval advanced (or a restart refreshed it). The stored
+   * choices and `currentRequirementId` are stale without this, so a later
+   * `approval/decide` is rejected and the approval never resolves.
+   */
+  private onApprovalUpdated(params: Record<string, unknown>): void {
+    const approvalId = typeof params.approvalId === "string" ? params.approvalId : undefined;
+    if (approvalId === undefined) return;
+    const request = this.requests.get(approvalId);
+    if (!request) return;
+    const choices = Array.isArray(params.availableChoices) ? params.availableChoices : [];
+    if (params.currentRequirementId !== undefined) {
+      this.requestRequirements.set(approvalId, params.currentRequirementId);
+    }
+    const updated: HarnessRuntimeRequest = {
+      ...request,
+      options: choices.map((choice) => ({
+        id: String((choice as Record<string, unknown>).choiceId ?? ""),
+        label: String((choice as Record<string, unknown>).label ?? ""),
+      })),
+    };
+    this.requests.set(approvalId, updated);
+    this.emit({ type: "request.updated", request: updated });
   }
 
   private onApprovalResolved(params: Record<string, unknown>): void {

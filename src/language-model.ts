@@ -31,12 +31,16 @@ export const INSTRUCTIONS_OPTION = "museInstructions";
 /** Mirrors OpenCode's `SessionRequestKind`: only `primary` drives the live turn. */
 export type RequestKind = "primary" | "compaction" | "title" | "generate";
 
-function toToolResult(result: ToolResult): HarnessToolResult {
+/** Convert an AI SDK tool result into the harness bridge shape. */
+export function toToolResult(result: ToolResult): HarnessToolResult {
   const output = result.output as Record<string, unknown> | undefined;
   let text = "";
   if (output && typeof output === "object") {
-    if (output.type === "text" && typeof output.value === "string") {
+    if ((output.type === "text" || output.type === "error-text") && typeof output.value === "string") {
       text = output.value;
+    } else if (output.type === "execution-denied") {
+      // A denied tool never ran; the reason is the whole answer.
+      text = typeof output.reason === "string" ? output.reason : "Tool execution was denied by the user.";
     } else if (output.type === "content" && Array.isArray(output.value)) {
       text = output.value
         .map((part) =>
@@ -117,14 +121,14 @@ export class MuseLanguageModel implements LanguageModelV3 {
       throw new Error("Muse model request is missing the session header");
     }
 
-    let live = await this.registry.get(sessionID, directory, forkSource);
+    let live = await this.registry.get(sessionID, directory, forkSource, this.modelId);
     let reseed = false;
     if (!live.isFresh && options.prompt.length < live.promptLength) {
       // OpenCode rewrote the history (compaction, rewind): the native session
       // still holds the old context, so recycle it and reseed from the full
       // prompt below.
       await this.registry.close(sessionID);
-      live = await this.registry.get(sessionID, directory, forkSource);
+      live = await this.registry.get(sessionID, directory, forkSource, this.modelId);
       reseed = true;
     }
     if (live.isFresh) {
@@ -141,53 +145,96 @@ export class MuseLanguageModel implements LanguageModelV3 {
       live.resolvePending(id, toToolResult(result));
     }
 
-    // Start a Muse turn for a new user message.
+    // Deliver a new user message: start a turn, or steer the running one.
     const turn = latestUserTurn(fresh);
-    if (turn && !live.hasActiveTurn) {
-      const providerOptions = options.providerOptions?.[this.providerOptionKey] as
-        | Record<string, unknown>
-        | undefined;
-      const agent = typeof providerOptions?.[AGENT_OPTION] === "string" ? providerOptions[AGENT_OPTION] : "";
-      const instructions =
-        typeof providerOptions?.[INSTRUCTIONS_OPTION] === "string" ? providerOptions[INSTRUCTIONS_OPTION] : "";
-      const preamble = [agent, instructions].filter((text) => text.length > 0).join("\n\n");
-      // After a history rewrite the fresh native session has seen nothing,
-      // so seed it with the whole condensed conversation, not just the delta.
-      const body = reseed ? fullConversationText(options.prompt) : turn.text;
-      const attachments = reseed ? allImages(options.prompt) : turn.images;
-      const text = live.prependPreamble(preamble) && preamble.length > 0
-        ? `${preamble}\n\n${body}`
-        : body;
-      await live.muse.startTurn({
-        turnId: `muse_turn_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-        message: {
-          content: [
-            ...(text.length > 0 ? [{ type: "text" as const, text }] : []),
-            ...attachments.map((image) => ({
-              type: "image" as const,
-              mediaType: image.mediaType,
-              data: image.data,
-            })),
-          ],
-        },
-      });
-      live.setActiveTurn(true);
+    if (turn) {
+      const running = live.hasActiveTurn ? live.activeTurnId : null;
+      if (running !== null) {
+        // OpenCode promotes input that arrives mid-turn as a steer. Dropping
+        // it would lose the message, so inject it into the running turn.
+        try {
+          await live.muse.steerTurn({
+            turnId: running,
+            message: {
+              content: [
+                ...(turn.text.length > 0 ? [{ type: "text" as const, text: turn.text }] : []),
+                ...turn.images.map((image) => ({
+                  type: "image" as const,
+                  mediaType: image.mediaType,
+                  data: image.data,
+                })),
+              ],
+            },
+          });
+        } catch {
+          // The turn ended before the steer landed; fall through to a new one.
+          live.setActiveTurn(false);
+        }
+      }
+      if (!live.hasActiveTurn) {
+        const providerOptions = options.providerOptions?.[this.providerOptionKey] as
+          | Record<string, unknown>
+          | undefined;
+        const agent = typeof providerOptions?.[AGENT_OPTION] === "string" ? providerOptions[AGENT_OPTION] : "";
+        const instructions =
+          typeof providerOptions?.[INSTRUCTIONS_OPTION] === "string" ? providerOptions[INSTRUCTIONS_OPTION] : "";
+        const preamble = [agent, instructions].filter((text) => text.length > 0).join("\n\n");
+        // After a history rewrite the fresh native session has seen nothing,
+        // so seed it with the whole condensed conversation, not just the
+        // delta. A forked session is in the same position on its first turn.
+        const seedFull = reseed || live.takeFullSeed();
+        const body = seedFull ? fullConversationText(options.prompt) : turn.text;
+        const attachments = seedFull ? allImages(options.prompt) : turn.images;
+        const text = live.prependPreamble(preamble) && preamble.length > 0
+          ? `${preamble}\n\n${body}`
+          : body;
+        const turnId = `muse_turn_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+        await live.muse.startTurn({
+          turnId,
+          message: {
+            content: [
+              ...(text.length > 0 ? [{ type: "text" as const, text }] : []),
+              ...attachments.map((image) => ({
+                type: "image" as const,
+                mediaType: image.mediaType,
+                data: image.data,
+              })),
+            ],
+          },
+        });
+        live.setActiveTurn(true, turnId);
+      }
     }
 
     live.promptLength = options.prompt.length;
+
+    // Cancelling the step must stop Muse: a native turn left running would keep
+    // producing events, and its finish would leak into the next step.
+    const abort = new AbortController();
+    const signal = options.abortSignal ? AbortSignal.any([abort.signal, options.abortSignal]) : abort.signal;
+    let interrupted = false;
+    const interrupt = () => {
+      if (interrupted) return;
+      interrupted = true;
+      abort.abort();
+      void live.interrupt();
+    };
+    if (signal.aborted) interrupt();
+    else signal.addEventListener("abort", interrupt, { once: true });
 
     let controller: ReadableStreamDefaultController<LanguageModelV3StreamPart> | undefined;
     const stream = new ReadableStream<LanguageModelV3StreamPart>({
       start: (value) => {
         controller = value;
-        live.attach(value);
         try {
           value.enqueue({ type: "stream-start", warnings: [] });
         } catch {
           // Closed.
         }
+        live.attach(value);
       },
       cancel: () => {
+        interrupt();
         live.detach();
       },
     });
@@ -236,7 +283,7 @@ export class MuseLanguageModel implements LanguageModelV3 {
       await ready;
       controller.enqueue({ type: "text-start", id: "utility-0" });
       try {
-        const result = await this.registry.runOnce(directory, content, options.abortSignal, tools);
+        const result = await this.registry.runOnce(directory, content, options.abortSignal, tools, this.modelId);
         controller.enqueue({ type: "text-delta", id: "utility-0", delta: result.text });
         controller.enqueue({ type: "text-end", id: "utility-0" });
         controller.enqueue({
