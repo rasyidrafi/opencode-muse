@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { randomBytes, randomUUID } from "node:crypto";
-import type { HarnessToolBridge } from "@rasyid_rafi/opencode-agent-harness-core";
+import type { HarnessToolBridge } from "./contract/index.js";
 
 /**
  * The tool bridge is how OpenCode's own tools become available to Muse.

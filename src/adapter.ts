@@ -4,7 +4,7 @@ import type {
   HarnessCapabilities,
   HarnessSession,
   OpenSessionInput,
-} from "@rasyid_rafi/opencode-agent-harness-core";
+} from "./contract/index.js";
 import { MuseHost, type MuseHostOptions } from "./host.js";
 import { MuseHarnessSession, type CreateSessionInput } from "./session.js";
 import { MUSE_CAPABILITIES } from "./capabilities.js";

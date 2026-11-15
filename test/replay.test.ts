@@ -1,10 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, test } from "bun:test";
-import {
-  assertTurnEventContract,
-  assistantText,
-  type HarnessEvent,
-} from "@rasyid_rafi/opencode-agent-harness-core/testing";
+import { assertTurnEventContract, assistantText } from "./harness/index.js";
+import type { HarnessEvent } from "../src/contract/index.js";
 import {
   MuseHarnessSession,
   type SessionHost,

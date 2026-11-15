@@ -1,8 +1,9 @@
 # opencode-muse
 
 Run [Muse Code](https://dev.meta.ai/docs/muse-code) inside
-[OpenCode](https://opencode.ai) through the harness-agnostic adapter contract
-from [`opencode-agent-harness`](../opencode-agent-harness).
+[OpenCode](https://opencode.ai) through a harness-agnostic adapter contract
+vendored in `src/contract/` (originally from
+[`opencode-agent-harness`](../opencode-agent-harness)).
 
 ## How it works
 
@@ -121,6 +122,8 @@ APPROVAL_MODE=allowAll bun run test/record.ts tool none "Run: echo hi"
 
 ```text
 src/
+  contract/           vendored harness contract: adapter, session, events,
+                      capabilities, entities, errors, ids, tool bridge
   capabilities.ts     observed Muse capabilities
   host.ts             spawn/supervise muse serve, raw MSP connection
   events.ts           MSP status/failure/usage mapping
@@ -134,6 +137,7 @@ src/
   shared.ts           registry singleton shared with the plugin
   plugin.ts           OpenCode plugin: provider, AI SDK, hooks
 test/
+  harness/             vendored conformance suite and contract assertions
   conformance.test.ts  shared contract conformance against a real host
   replay.test.ts       recorded MSP transcripts
   tool-bridge.test.ts  live tool bridge round trip

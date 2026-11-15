@@ -1,4 +1,4 @@
-import { disabledCapabilities, type HarnessCapabilities } from "@rasyid_rafi/opencode-agent-harness-core";
+import { disabledCapabilities, type HarnessCapabilities } from "./contract/index.js";
 
 /**
  * Capabilities observed from a real Muse Code 1.4.15 host (`muse serve`).

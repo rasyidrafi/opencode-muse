@@ -6,7 +6,8 @@ Versi yang diteliti: Muse Code 1.4.15 (`muse serve`), OpenCode 2.2.6, `@muse-cod
 ## 1. Kesimpulan
 
 Muse Code bisa dijalankan di dalam OpenCode sebagai sebuah **OpenCode plugin** yang menjalankan
-**adapter harness-agnostic** (`@opencode-agent-harness/core`). Arsitekturnya:
+**adapter harness-agnostic** (`@opencode-agent-harness/core`, kontraknya kini
+di-vendor di `src/contract/`). Arsitekturnya:
 
 ```
 OpenCode (TUI / run)
@@ -26,7 +27,8 @@ Semua jalur kunci di bawah ini diuji live di mesin ini.
 
 ## 2. Kontrak harness-agnostic
 
-Sumber: `../opencode-agent-harness` (`docs/contract.md`, `src/`).
+Sumber: `../opencode-agent-harness` (`docs/contract.md`, `src/`); kontrak ini
+sekarang di-vendor ke `src/contract/`.
 
 | Bagian | Isi |
 | --- | --- |

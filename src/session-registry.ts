@@ -1,5 +1,5 @@
 import type { LanguageModelV3StreamPart, LanguageModelV3Usage } from "@ai-sdk/provider";
-import type { HarnessEvent, HarnessToolBridge, HarnessToolResult } from "@rasyid_rafi/opencode-agent-harness-core";
+import type { HarnessEvent, HarnessToolBridge, HarnessToolResult } from "./contract/index.js";
 import { MuseHarnessAdapter } from "./adapter.js";
 import type { MuseHarnessSession } from "./session.js";
 import { StreamConverter } from "./convert.js";

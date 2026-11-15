@@ -3,7 +3,7 @@ import {
   runHarnessConformance,
   userMessage,
   type HarnessConformanceDriver,
-} from "@rasyid_rafi/opencode-agent-harness-core/testing";
+} from "./harness/index.js";
 import { MuseHarnessAdapter } from "../src/index.js";
 
 /**

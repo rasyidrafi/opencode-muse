@@ -6,7 +6,7 @@ import type {
   HarnessSessionStatus,
   HarnessToolItemStatus,
   HarnessTurnStatus,
-} from "@rasyid_rafi/opencode-agent-harness-core";
+} from "./contract/index.js";
 
 /** MSP item status -> contract tool status. */
 export function toToolStatus(status: string): HarnessToolItemStatus {

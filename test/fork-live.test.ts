@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { HarnessEvent } from "@rasyid_rafi/opencode-agent-harness-core";
+import type { HarnessEvent } from "../src/contract/index.js";
 import { MuseHarnessAdapter, MuseHarnessSession } from "../src/index.js";
 
 async function runTurn(

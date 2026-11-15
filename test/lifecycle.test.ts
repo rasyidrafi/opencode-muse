@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { LanguageModelV3CallOptions, LanguageModelV3StreamPart } from "@ai-sdk/provider";
-import type { HarnessEvent } from "@rasyid_rafi/opencode-agent-harness-core";
+import type { HarnessEvent } from "../src/contract/index.js";
 import {
   HEADERS,
   LiveSession,

@@ -8,7 +8,6 @@
         "@ai-sdk/provider": "3.0.8",
         "@muse-code/sdk": "1.4.15",
         "@opencode/plugin": "2.2.7",
-        "@rasyid_rafi/opencode-agent-harness-core": "^0.1.0",
       },
       "devDependencies": {
         "@types/bun": "^1.3.14",
@@ -153,8 +152,6 @@
     "@opentelemetry/semantic-conventions": ["@opentelemetry/semantic-conventions@1.45.0", "", {}, "sha512-aOP45mbcOKbQVvFWfQmgoOPT8R2iwbbbgl83k4CujGV9BrJhFr3qG55MFpwFs4YLabpuW3HhzUY9eQxPlDqaZw=="],
 
     "@pkgjs/parseargs": ["@pkgjs/parseargs@0.11.0", "", {}, "sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg=="],
-
-    "@rasyid_rafi/opencode-agent-harness-core": ["@rasyid_rafi/opencode-agent-harness-core@0.1.0", "", {}, "sha512-j6PXWyqxX/hXLRbAGL50Rof0A0hBEozH/WkMPMWEK2LRj+4oI2JinADNWLYzXXPs1LhTPK7e0/d7eoeGA/9H8g=="],
 
     "@redis/bloom": ["@redis/bloom@6.3.1", "", { "peerDependencies": { "@redis/client": "^6.3.1" } }, "sha512-dpF9j2yJDoPzSCaZn0MSB3xzmnXQVJeTSAWJcQVcgbmluwhpFeemmII0cF1t+WYfoVS+shEFq79+MmUItgzJLg=="],
 
