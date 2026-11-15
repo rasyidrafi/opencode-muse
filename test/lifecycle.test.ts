@@ -233,6 +233,38 @@ describe("LiveSession step settling", () => {
     }
   });
 
+  test("a parked step delivers its finish to its own stream, not the next", async () => {
+    const { host } = fakeHost({ "turn/start": { turnId: "native-turn" } });
+    const session = MuseHarnessSession.fromNativeSession(host, { sessionId: "oc", cwd: "/tmp" }, "native");
+    const live = new LiveSession("oc", session);
+    try {
+      await session.startTurn({ turnId: "t1", message: { content: [{ type: "text", text: "hi" }] } });
+      session.handleNotification({
+        method: "turn/started",
+        params: { turnId: "native-turn", sessionId: "native" },
+      } as MuseNotification);
+      live.setActiveTurn(true, "t1");
+
+      const first = fakeController();
+      live.attach(first.controller);
+      live.emitToolCall({ toolCallId: "tc1", toolName: "lookup", input: { q: "x" } });
+      await new Promise((resolve) => setTimeout(resolve, 80));
+
+      expect(first.parts.some((part) => part.type === "finish")).toBe(true);
+      expect(first.closed()).toBe(true);
+
+      const second = fakeController();
+      live.attach(second.controller);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      // The turn is still parked on the tool call, so the next step stays open
+      // and waits for Muse instead of settling on a foreign finish.
+      expect(second.parts.some((part) => part.type === "finish")).toBe(false);
+      expect(second.closed()).toBe(false);
+    } finally {
+      await live.close();
+    }
+  });
+
   test("a step with no turn running settles at once", async () => {
     const { host } = fakeHost();
     const session = MuseHarnessSession.fromNativeSession(host, { sessionId: "oc", cwd: "/tmp" }, "native");

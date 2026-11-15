@@ -329,11 +329,11 @@ export class LiveSession {
       this.parkTimer = null;
     }
     const controller = this.controller;
-    this.controller = null;
     if (this.stepAborted) {
       // The step was cancelled: a finish for it would be a stray part in the
       // next step's stream. Close the controller we already detached instead.
       this.stepAborted = false;
+      this.controller = null;
       if (controller) {
         try {
           controller.close();
@@ -343,6 +343,9 @@ export class LiveSession {
       }
       return;
     }
+    // The terminal parts belong to this step's controller. Detaching first
+    // would park the finish in the queue, and the next step would open with a
+    // foreign finish and settle immediately, ending OpenCode's agent loop.
     for (const part of this.converter.closeBlocks()) this.enqueue(part);
     const usage = this.stepUsage;
     this.stepUsage = {};
@@ -353,6 +356,7 @@ export class LiveSession {
         : { unified: "stop", raw: "stop" },
       usage: toAIUsage(usage),
     });
+    this.controller = null;
     if (controller) {
       try {
         controller.close();
