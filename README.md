@@ -68,6 +68,7 @@ Environment variables read by the plugin:
 | --- | --- | --- |
 | `MUSE_BIN` | `muse` | Muse Code binary. |
 | `MUSE_PRESET` | `empty` | Host preset. The default `empty` disables Muse's built-in tools, so only OpenCode's tools reach Muse through the bridge. |
+| `MUSE_CONTRIBUTOR_MODE` | `off` | Per-process contributor mode for `muse serve`. The `empty` preset turns it on, which routes every model to its `-contributor` variant; a model without one (for example `muse-ember-1.0`) then fails. `off` keeps the model id from the list authoritative. |
 
 Example — run Muse with no built-in tools (custom MCP tools only):
 
@@ -84,6 +85,11 @@ muse mcp add my-tools --project -- node /path/to/mcp-server.js
 With `MUSE_PRESET=empty`, Muse starts with no built-in tools and uses only the
 MCP servers you configured. The per-session MCP server requires
 `--trust-workspace`, which the plugin always passes.
+
+With `MUSE_CONTRIBUTOR_MODE=off`, the model list carries both a model and its
+contributor variant where Muse publishes one (for example `muse-spark-1.3` and
+`muse-spark-1.3-contributor`). A model with no contributor variant lists only
+its base id.
 
 ## Permissions, approval, and questions
 

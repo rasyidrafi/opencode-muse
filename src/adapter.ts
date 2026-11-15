@@ -50,10 +50,10 @@ export class MuseHarnessAdapter implements HarnessAdapter {
     return MUSE_CAPABILITIES;
   }
 
-  /** Read the Muse model catalog. */
+  /** Read the selectable Muse models: visible rows plus contributor variants. */
   async listModels(): Promise<Array<Record<string, unknown>>> {
     const host = await this.ensureHost();
-    return host.listModels();
+    return host.listSelectableModels();
   }
 
   async openSession(input: MuseOpenSessionInput): Promise<HarnessSession> {

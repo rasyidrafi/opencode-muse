@@ -1,5 +1,6 @@
 import { Model, Plugin, Provider } from "@opencode/plugin";
 import { MuseHarnessAdapter } from "./adapter.js";
+import { CONTRIBUTOR_SUFFIX } from "./host.js";
 import { HEADERS, MuseLanguageModel } from "./language-model.js";
 import { MuseSessionRegistry, type SessionStore } from "./session-registry.js";
 import { setGlobalRegistry } from "./shared.js";
@@ -72,10 +73,14 @@ function toModelInfo(providerID: ReturnType<typeof Provider.ID.make>, model: Rec
   const variants = Array.isArray(model.variants) ? model.variants : [];
   const displayLabel = typeof model.displayLabel === "string" ? model.displayLabel : modelId;
   const released = typeof model.releaseDate === "string" ? Date.parse(model.releaseDate) : Number.NaN;
+  const isContributor = modelId.endsWith(CONTRIBUTOR_SUFFIX);
+  const baseId = isContributor ? modelId.slice(0, -CONTRIBUTOR_SUFFIX.length) : modelId;
   return {
     ...base,
     modelID: Model.ID.make(modelId),
-    name: MODEL_NAMES[modelId] ?? displayLabel,
+    name: isContributor
+      ? `${MODEL_NAMES[baseId] ?? baseId} (Contributor)`
+      : MODEL_NAMES[baseId] ?? displayLabel,
     family: Model.Family.make(MODEL_FAMILY),
     capabilities: { tools: true, input: ["text", "image"], output: ["text"] },
     variants: variants.map((variant) => ({ id: Model.VariantID.make(String(variant)) })),
@@ -101,6 +106,11 @@ export const MusePlugin = Plugin.define({
         // bypassing OpenCode's permissions and history. `empty` keeps only the
         // per-session MCP bridge, so every tool call reaches OpenCode.
         preset: process.env.MUSE_PRESET ?? "empty",
+        // The `empty` preset turns contributor mode on, which routes every
+        // model to its `-contributor` variant; a model without one (ember)
+        // then fails. Off keeps the id from the model list authoritative, so
+        // both the base entry and the contributor entry work.
+        contributorMode: process.env.MUSE_CONTRIBUTOR_MODE === "on" ? "on" : "off",
         trustWorkspace: true,
       },
     });
