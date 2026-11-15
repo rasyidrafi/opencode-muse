@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { contributorModelEntries, serveArgs, type CatalogRow } from "../src/index.js";
+import { Provider } from "@opencode/plugin";
+import { contributorModelEntries, serveArgs, toModelInfo, type CatalogRow } from "../src/index.js";
+
+const providerID = Provider.ID.make("muse");
 
 const visible = [
   {
@@ -59,6 +62,16 @@ describe("contributorModelEntries", () => {
       { model_id: "muse-ember-1.0-contributor", display_label: "muse-ember-1.0-contributor", description: null },
     ];
     expect(contributorModelEntries(visible, rows)[0]).not.toHaveProperty("description");
+  });
+});
+
+describe("toModelInfo", () => {
+  test("names contributor entries the way models.dev does", () => {
+    const name = (modelId: string) =>
+      toModelInfo(providerID, { modelId, displayLabel: modelId }).name;
+    expect(name("muse-spark-1.3")).toBe("Muse Spark 1.3");
+    expect(name("muse-spark-1.3-contributor")).toBe("Muse Spark 1.3 Contributor");
+    expect(name("muse-ember-1.0")).toBe("Muse Ember");
   });
 });
 

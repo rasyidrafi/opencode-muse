@@ -65,7 +65,7 @@ function instructionsText(system: ReadonlyArray<SystemPart>): string {
   return texts.join("\n\n");
 }
 
-function toModelInfo(providerID: ReturnType<typeof Provider.ID.make>, model: Record<string, unknown>) {
+export function toModelInfo(providerID: ReturnType<typeof Provider.ID.make>, model: Record<string, unknown>) {
   const modelId = String(model.modelId ?? "");
   const base = Model.Info.default(providerID, Model.ID.make(modelId));
   const contextLimit = typeof model.contextLimit === "number" ? model.contextLimit : 1_048_576;
@@ -79,7 +79,7 @@ function toModelInfo(providerID: ReturnType<typeof Provider.ID.make>, model: Rec
     ...base,
     modelID: Model.ID.make(modelId),
     name: isContributor
-      ? `${MODEL_NAMES[baseId] ?? baseId} (Contributor)`
+      ? `${MODEL_NAMES[baseId] ?? baseId} Contributor`
       : MODEL_NAMES[baseId] ?? displayLabel,
     family: Model.Family.make(MODEL_FAMILY),
     capabilities: { tools: true, input: ["text", "image"], output: ["text"] },

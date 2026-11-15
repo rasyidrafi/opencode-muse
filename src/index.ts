@@ -9,4 +9,4 @@ export * from "./convert.js";
 export * from "./session-registry.js";
 export * from "./language-model.js";
 export * from "./shared.js";
-export { MusePlugin, MusePlugin as default } from "./plugin.js";
+export { MusePlugin, MusePlugin as default, toModelInfo } from "./plugin.js";
